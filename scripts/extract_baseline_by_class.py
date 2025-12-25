@@ -6,19 +6,15 @@ from ultralytics import YOLO
 from tqdm import tqdm
 
 # ===================== 配置区 =====================
-DATASET_ROOT = r"D:/github/DriftKit/dataset"
+DATASET_ROOT = r"D:/github/DriftKit/dataset"   # ⚠️ 用 raw string
 MODEL_PATH = "yolo11n.pt"
 IMG_SIZE = 640
-DEVICE = "cpu"          # 后面可切 cuda
-HOOK_LAYER_INDEX = 10   # C2PSA（backbone 高语义层）
+DEVICE = "cpu"   # 你目前是 CPU，后面可改 cuda
+OUTPUT_DIR = "outputs"
+HOOK_LAYER_INDEX = 10   # C2PSA（高语义 backbone 末端）
+# ==================================================
 
-# 输出目录：明确区分
-TRAIN_OUT_DIR = "outputs/train"
-VAL_OUT_DIR   = "outputs/val"
-
-os.makedirs(TRAIN_OUT_DIR, exist_ok=True)
-os.makedirs(VAL_OUT_DIR, exist_ok=True)
-# =================================================
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------- 加载模型 ----------------
 model = YOLO(MODEL_PATH)
@@ -38,6 +34,7 @@ def hook_fn(module, inp, out):
         feat = out.mean(dim=[2, 3])  # Global Average Pooling
         feature_buffer.append(feat.cpu())
 
+# 注册 hook
 hook_handle = net.model[HOOK_LAYER_INDEX].register_forward_hook(hook_fn)
 
 # ---------------- 图像预处理 ----------------
@@ -51,22 +48,18 @@ def load_image(img_path):
     img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
     return img.to(DEVICE)
 
-# =================================================
-# 核心函数：抽取一个 split 的特征
-# =================================================
-def extract_split_features(split_name, output_dir):
-    """
-    split_name: 'train' or 'val'
-    output_dir: 对应输出目录
-    """
-    split_dir = os.path.join(DATASET_ROOT, split_name)
-    print(f"\n== EXTRACTING {split_name.upper()} FEATURES ==")
+# ---------------- 主逻辑 ----------------
+all_features = {}
+all_filenames = {}  # 新增：保存真实文件名
+total_images = 0
+
+for split in ["train", "val"]:
+    split_dir = os.path.join(DATASET_ROOT, split)
+    print(f"\n== SCANNING {split_dir} ==")
 
     if not os.path.isdir(split_dir):
         print(f"❌ Not found: {split_dir}")
-        return 0
-
-    total_images = 0
+        continue
 
     for cls in sorted(os.listdir(split_dir)):
         cls_dir = os.path.join(split_dir, cls)
@@ -75,9 +68,10 @@ def extract_split_features(split_name, output_dir):
 
         print(f"  -> Class {cls}")
         cls_features = []
+        cls_filenames = []  # 新增
 
         img_files = sorted(os.listdir(cls_dir))
-        for f in tqdm(img_files, desc=f"{split_name}/{cls}", leave=False):
+        for f in tqdm(img_files, desc=f"{split}/{cls}", leave=False):
             if not f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
                 continue
 
@@ -91,44 +85,35 @@ def extract_split_features(split_name, output_dir):
                 _ = net(img)
 
             if len(feature_buffer) == 0:
-                print(f"⚠️ No feature captured: {img_path}")
+                print(f"⚠️ No feature captured for {img_path}")
                 continue
 
-            feat = feature_buffer[0].squeeze(0)  # [C]
+            feat = feature_buffer[0].squeeze(0)  # [256]
             cls_features.append(feat.numpy())
+            cls_filenames.append(f)  # 保存真实文件名
             total_images += 1
 
-        if len(cls_features) == 0:
-            print(f"    ⚠️ No valid images for class {cls}")
-            continue
+        if len(cls_features) > 0:
+            cls_features = np.stack(cls_features).astype(np.float32)
+            all_features[f"{split}_{cls}"] = cls_features
+            all_filenames[f"{split}_{cls}"] = cls_filenames  # 保存对应文件名
+            print(f"    ✔ Collected {cls_features.shape[0]} features")
 
-        cls_features = np.stack(cls_features).astype(np.float32)
-        out_path = os.path.join(output_dir, f"{cls}_features.npy")
-        np.save(out_path, cls_features)
+print(f"\n✅ TOTAL IMAGES PROCESSED: {total_images}")
 
-        print(f"    ✔ Saved {out_path}, shape={cls_features.shape}")
+# ---------------- 保存特征 ----------------
+for k, v in all_features.items():
+    out_path = os.path.join(OUTPUT_DIR, f"{k}_features.npy")
+    np.save(out_path, v)
+    print(f"Saved: {out_path}, shape={v.shape}")
 
-    return total_images
+# ---------------- 保存对应文件名 ----------------
+for k, v in all_filenames.items():
+    out_path = os.path.join(OUTPUT_DIR, f"{k}_filenames.npy")
+    np.save(out_path, np.array(v))  # 保存字符串数组
+    print(f"Saved filenames: {out_path}, length={len(v)}")
 
-# =================================================
-# 主流程（⚠️ 关键逻辑）
-# =================================================
-
-# Step 1 ✅ 只用 train 建立 baseline 特征
-num_train = extract_split_features(
-    split_name="train",
-    output_dir=TRAIN_OUT_DIR
-)
-
-# Step 2 ✅ val 作为“新数据”，不参与 baseline
-num_val = extract_split_features(
-    split_name="val",
-    output_dir=VAL_OUT_DIR
-)
-
+# ---------------- 清理 ----------------
 hook_handle.remove()
 
-print("\n================ SUMMARY ================")
-print(f"TRAIN images processed: {num_train}")
-print(f"VAL   images processed: {num_val}")
-print("🎯 Feature extraction finished (train = baseline, val = new data)")
+print("\n🎯 Baseline feature extraction DONE.")
