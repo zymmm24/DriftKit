@@ -1,0 +1,33 @@
+extract_baseline_by_class.py:
+用于在模型正常工作（健康期）的数据上，抽取 YOLO 模型内部的中间特征，并构建可用于后续漂移检测的特征基线分布。
+在不修改模型结构、不影响推理结果的前提下，通过 forward hook 的方式获取模型 Neck 最后一层（Detect 前一层）的特征表示，用于刻画模型在做出检测决策前的潜在语义状态。
+脚本运行完成后，会在 outputs/ 目录下生成以下文件：
+1️⃣ features.npy
+类型：NumPy 数组
+形状：(N, C)
+N：样本总数（train + val）
+C：特征维度（如 256）
+内容含义：
+每一行对应一张图片在模型潜在空间中的特征表示
+构成“健康期特征分布”的核心数据
+用途：
+构建类条件特征原型（prototype）
+计算漂移分数（L2 / Cosine / Mahalanobis）
+作为部署期特征对比的参考基线
+2️⃣ meta.csv
+类型：CSV 表格文件
+字段说明：
+字段名	含义
+split	数据来源（train / val）
+class_id	类别或等级标签
+image	图片文件名
+num_boxes	检测到的目标数量
+conf_mean	置信度均值
+conf_std	置信度标准差
+用途：
+辅助分析模型输出行为是否异常
+区分“特征漂移”与“目标数量 / 置信度分布变化”
+为后续漂移诊断和修复建议提供可解释依据
+
+build_baseline_stats.py:
+baseline统计建模
