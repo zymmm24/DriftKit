@@ -1,55 +1,163 @@
-# DriftKit
+------
 
-针对 YOLO 模型部署阶段的工具集合，已实现的功能包括在**参考基线阶段**抽取中间层特征、基线统计建模，以及基于基线对推理/测试期特征进行对比分析（漂移/距离度量）。
+# DriftKit（半成品，没什么用）
 
-## 目前已实现的功能
-- 在参考基线阶段运行 YOLO 模型并挂 hook 抽取中间层 embedding，导出每个检测实例的特征向量与元信息。
-- 基于参考基线阶段的特征计算并保存基线统计（类条件均值/协方差或等效统计表示）。
-- 对测试/推理期的特征与基线进行对比，计算漂移/距离度量并导出分析结果或可视化产物。
-- 提供一个工具用于快速查看 `.npy` / `.npz` 特征文件的基本信息。
+### **YOLO 感知特征分布漂移检测与解释框架（V1.0）**
 
-## 目录
-```
-DriftKit/
-├── scripts/
-│ ├── extract_baseline_by_class.py # 从数据集运行模型并抽取特征，输出 features.npy + meta.csv
-│ ├── build_baseline_stats.py # 从抽取的特征构建基线统计并保存
-│ └── analyze_features.py # 比较测试/推理期特征与基线，计算距离/漂移并导出结果
-├── dataset/ # 示例数据集或数据说明
-├── ultralytics-main/ 
-├── inspect_npy.py # 快速查看 .npy/.npz 文件的 shape 与统计信息
-├── yolo11n.pt / yolo11n-cls.pt # 示例/测试用的模型权重
-└── README.md # 项目说明
-```
+DriftKit 是一个面向 **YOLO 系列模型** 的特征分布漂移检测工具，用于在模型部署后持续监控输入数据是否偏离训练阶段建立的统计认知，从而降低因数据变化导致的隐性性能退化风险。
 
-## 输入 / 输出
 
-- `scripts/extract_baseline_by_class.py`  
-  - 输入：YOLO 权重、数据集路径、输出目录。  
-  - 输出：`features.npy`（N × C 的特征矩阵）和 `meta.csv`（每行特征的元信息：image, class_id, bbox, conf_mean/conf_std, num_boxes 等）。
 
-- `scripts/build_baseline_stats.py`  
-  - 输入：`features.npy` 与 `meta.csv`。  
-  - 输出：基线统计文件（例如 `baseline_stats.npz`），包含每类的均值、协方差或其它用于距离计算的数据结构。
+### 第一步：实现逻辑清单（baseline_collector.py）
 
-- `scripts/analyze_features.py`  
-  - 输入：基线统计文件、测试/推理期抽取的特征。  
-  - 输出：每个测试样本/检测实例的漂移/距离评分文件及可视化结果。
+1. 从 YOLOv11 自动挂载感知层 Hook，批量抽取图像级 embedding 并按检测框关联标签；
+2. 用模型标签映射统一语义，随后对 embedding 做 StandardScaler 标准化并用 PCA 对齐降维；
+3. 生成baseline_assets 文件夹，将结果持久化为 `baseline_db.pkl`（特征+标签）和 `pca_scaler.pkl`（scaler+PCA）存入，作为后续漂移检测基准。
 
-- `inspect_npy.py`  
-  - 输入：`.npy` / `.npz` 文件路径。  
-  - 输出：终端打印的文件 shape、dtype、min/max/mean/std 等信息。
+#### baseline_assets 文件夹：
 
-## 运行示例（按脚本名展示）
-```bash
-# 抽取参考基线阶段特征
-python scripts/extract_baseline_by_class.py --weights <weights.pt> --dataset <train_dataset_path> --out_dir outputs/
+这个文件夹是整个漂移检测系统的“记忆库”。里面通常包含两个关键文件：
 
-# 构建基线统计
-python scripts/build_baseline_stats.py --features outputs/features.npy --meta outputs/meta.csv --out_dir outputs/
+A. baseline_db.pkl (基准数据库)
+这是一个经过处理的 DataFrame，存储了模型在“黄金数据集”（训练集/基准集）上的表现：
 
-# 分析 / 对比测试特征
-python scripts/analyze_features.py --baseline outputs/baseline_stats.npz --test_features test_features.npy --out_dir analysis_results/
+label: 图片或物体的语义标签（如：正常、缺陷A）。
 
-# 快速查看 .npy 文件
-python inspect_npy.py outputs/features.npy
+embedding_pca: 关键数据。它是从模型第 317 层提取并经过 PCA 压缩后的 128 维特征向量。它代表了模型眼中“正常数据应该长什么样”的数学本质。
+
+conf: 模型预测的置信度，用于后续监控模型是否变得“不再自信”。
+
+B. pca_scaler.pkl (空间映射器)
+这存储了你的**“翻译标准”**：
+
+它记录了基准数据的平均值、标准差以及 PCA 的投影矩阵。
+
+作用：当未来有新图片进来时，必须使用这套相同的参数进行转换，否则新老数据就不在同一个“数学坐标系”下，无法对比。
+
+
+
+### 第二步：实时漂移检测（drift_detector.py）
+
+在完成基准资产构建后，系统进入 **“感知与判断阶段”**。该阶段的目标不是重新训练模型，而是**持续判断当前数据是否仍然符合训练阶段建立的“统计认知”**。
+
+#### 核心职责：
+
+1. **空间对齐（Feature Alignment）**
+    加载 `baseline_assets/pca_scaler.pkl`，将新数据的 embedding 映射到与基准数据完全一致的 PCA 空间，确保新旧特征处于同一数学坐标系。
+
+2. **分布差异度量（Distribution Shift Measurement）**
+    使用 **最大平均差异（MMD, Maximum Mean Discrepancy）** 对比：
+
+   - 基准数据（Baseline / Train）
+   - 当前数据（Current / Val / Online）
+
+   MMD 衡量的是**两个高维分布是否来自同一生成机制**，而非单点距离，因此非常适合用于整体环境变化检测。
+
+3. **统计显著性检验（Permutation Test）**
+    通过排列检验计算 P-Value，判断观测到的分布差异：
+
+   - 是随机采样波动
+   - 还是具有统计显著性的真实漂移
+
+4. **工程级判决输出**
+    最终输出清晰、可执行的结论：
+
+   - `DATA STABLE`：当前数据与基准分布一致
+   - `DRIFT DETECTED`：检测到显著特征漂移
+
+------
+
+#### drift_detector.py 的输出内容
+
+运行漂移检测后，系统会生成两类核心产物：
+
+#### A. 漂移可视化结果（drift_visualization.png）
+
+- 将基准数据与当前数据投影到 PCA 前两个主成分；
+- 直观展示两组分布是否发生断层或偏移；
+- 用于人工审查、调试和报告支撑。
+
+该图**不参与判决逻辑**，仅用于辅助理解和解释。
+
+------
+
+#### B. 漂移检测结果（drift_result.pkl / dict）
+
+这是一个结构化的检测结果对象，包含：
+
+- MMD 距离值
+- P-Value（统计显著性）
+- 判决阈值 alpha
+- 是否发生漂移的布尔结论
+
+它是后续 **策略层与报告层的唯一输入接口**。
+
+
+
+### 第三步：漂移报告生成（drift_report.py）
+
+漂移检测本身是算法行为，而 **漂移报告** 是系统对“人类”的输出。
+
+`drift_report.py` 的目标是：
+
+> **将统计检测结果，转化为任何工程人员都能快速理解和执行的决策报告。**
+
+------
+
+#### 报告结构说明
+
+系统会生成一个标准化的 `drift_report.json`，其结构如下：
+
+**1️⃣ Meta（报告元信息）**
+
+记录报告的生成时间、类型和版本号，用于审计和长期追踪。
+
+**2️⃣ Data Info（数据背景）**
+
+说明本次漂移判断所基于的数据来源与规模，包括：
+
+- 基准数据来源
+- 测试数据来源
+- 样本数量
+- 实际参与统计对比的窗口大小
+
+这是保证 **结果可复现性** 的关键部分。
+
+------
+
+**3️⃣ Statistics（统计结果）**
+
+包含所有核心统计量：
+
+- MMD 距离（分布差异强度）
+- P-Value（统计显著性）
+- alpha（判决阈值）
+- 可视化文件路径
+
+这部分回答的是：**“变化大不大？是否显著？”**
+
+------
+
+**4️⃣ Decision（系统判决）**
+
+系统级决策结果，直接用于工程逻辑：
+
+- `is_drift`: 是否检测到漂移（True / False）
+- `status`: 人类可读的状态描述
+
+------
+
+**5️⃣ Interpretation（人类可读解释）**
+
+用自然语言解释当前系统状态，例如：
+
+- 数据是否稳定
+- 是否需要人工介入
+- 模型是否仍然处于可信运行区间
+
+这是整个系统**面向非算法人员最重要的输出**。
+
+
+
+
+
