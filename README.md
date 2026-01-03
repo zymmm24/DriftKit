@@ -1,33 +1,14 @@
-<div align="center">
-
-# 🌊 DriftKit
+# DriftKit
 
 **YOLO 感知特征分布漂移检测与解释框架**
 
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![Ultralytics](https://img.shields.io/badge/Ultralytics-8.2+-00FFFF.svg)](https://ultralytics.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-*在模型部署后持续监控数据分布变化，守护 AI 系统的可靠性*
-
-[快速开始](#-快速开始) •
-[核心功能](#-核心功能) •
-[使用方法](#-使用方法) •
-[API 文档](#-api-文档) •
-[路线图](#-路线图)
-
-</div>
-
----
-
-## 📖 项目简介
-
-**DriftKit** 是一个面向 YOLO 系列模型的特征分布漂移检测工具。在机器学习系统中，模型性能退化往往是"静默"发生的——输入数据的分布悄然偏离训练数据，而模型仍在正常输出预测结果，直到错误积累到无法忽视的程度。
+DriftKit 是一个面向 YOLO 系列模型的特征分布漂移检测工具。在机器学习系统中，模型性能退化往往是"静默"发生的——输入数据的分布悄然偏离训练数据，而模型仍在正常输出预测结果，直到错误积累到无法忽视的程度。
 
 DriftKit 通过提取模型内部特征表示，建立统计基准，实时监控新数据与基准的分布差异，在问题恶化之前发出预警。
 
-### 🎯 适用场景
+---
+
+## 适用场景
 
 - **工业质检**：产品外观/缺陷检测模型的持续监控
 - **安防监控**：摄像头场景变化（光照、角度、遮挡）的自动感知
@@ -36,19 +17,19 @@ DriftKit 通过提取模型内部特征表示，建立统计基准，实时监�
 
 ---
 
-## ✨ 核心功能
+## 核心功能
 
 | 功能模块 | 描述 |
 |----------|------|
-| 🔗 **自动特征挂载** | 自动定位 YOLO 分类头前层，无需手动配置即可提取高维特征 |
-| 📊 **多层级漂移检测** | 支持全局、类别、特征维度、样本级四种粒度的漂移分析 |
-| 📐 **统计显著性检验** | 基于 MMD + 排列检验，区分随机波动与真实漂移 |
-| 📝 **结构化报告输出** | 生成 JSON 格式报告，包含人类可读的决策建议 |
-| 🎛️ **空间对齐机制** | 使用持久化的 Scaler + PCA 确保新旧数据可比性 |
+| 自动特征挂载 | 自动定位 YOLO 分类头前层，无需手动配置即可提取高维特征 |
+| 多层级漂移检测 | 支持全局、类别、特征维度、样本级四种粒度的漂移分析 |
+| 统计显著性检验 | 基于 MMD + 排列检验，区分随机波动与真实漂移 |
+| 结构化报告输出 | 生成 JSON 格式报告，包含人类可读的决策建议 |
+| 空间对齐机制 | 使用持久化的 Scaler + PCA 确保新旧数据可比性 |
 
 ---
 
-## 🏗️ 系统架构
+## 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -91,7 +72,7 @@ DriftKit 通过提取模型内部特征表示，建立统计基准，实时监�
 
 ---
 
-## 📦 安装
+## 安装
 
 ### 环境要求
 
@@ -101,11 +82,8 @@ DriftKit 通过提取模型内部特征表示，建立统计基准，实时监�
 ### 安装依赖
 
 ```bash
-# 克隆仓库
-git clone https://github.com/your-username/DriftKit.git
+git clone https://github.com/zymmm24/driftkit.git
 cd DriftKit
-
-# 安装依赖
 pip install -r requirements.txt
 ```
 
@@ -123,11 +101,11 @@ ultralytics==8.2.38
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 准备数据集
 
-按以下结构组织您的数据：
+按以下结构组织数据：
 
 ```
 dataset/
@@ -143,7 +121,7 @@ dataset/
 
 ### 2. 训练 YOLO 分类模型（可选）
 
-如果您已有训练好的模型，可跳过此步骤。
+如果已有训练好的模型，可跳过此步骤。
 
 ```bash
 yolo classify train data=./dataset model=yolo11n-cls.pt epochs=50 imgsz=224
@@ -152,7 +130,6 @@ yolo classify train data=./dataset model=yolo11n-cls.pt epochs=50 imgsz=224
 ### 3. 运行完整流程
 
 ```bash
-# 进入源码目录
 cd src
 
 # Step 1: 生成基准资产
@@ -167,7 +144,7 @@ python drift_report.py
 
 ---
 
-## 📚 使用方法
+## 使用方法
 
 ### Step 1: 基准特征收集
 
@@ -176,16 +153,12 @@ python drift_report.py
 ```python
 from baseline_collector import YOLO11AutoCollector
 
-# 初始化收集器
 collector = YOLO11AutoCollector(
     model_path="runs/classify/train2/weights/best.pt",
     dataset_root="dataset/train"
 )
 
-# 执行特征提取
 df = collector.run()
-
-# 保存基准资产
 pca, scaler = collector.save_assets(df, folder="baseline_assets")
 ```
 
@@ -203,21 +176,18 @@ pca, scaler = collector.save_assets(df, folder="baseline_assets")
 ```python
 from drift_detector import DriftDetector
 
-# 初始化检测器
 detector = DriftDetector(baseline_path="baseline_assets/baseline_db.pkl")
 
-# 执行检测
 result = detector.detect(
     test_pkl_path="baseline_assets/val_test_data.pkl",
-    window_size=100,    # 采样窗口大小
-    alpha=0.05          # 显著性水平
+    window_size=100,
+    alpha=0.05
 )
 
-# 结果判定
 if result["is_drift"]:
-    print("⚠️ 检测到数据漂移！")
+    print("检测到数据漂移！")
 else:
-    print("✅ 数据分布稳定")
+    print("数据分布稳定")
 ```
 
 **检测结果结构：**
@@ -241,19 +211,17 @@ else:
 ```python
 from drift_report import DriftReportGenerator
 
-# 初始化报告生成器
 generator = DriftReportGenerator(
     baseline_pkl="baseline_assets/baseline_db.pkl",
     test_pkl="baseline_assets/val_test_data.pkl"
 )
 
-# 生成报告
 report = generator.generate_report(output_path="drift_report.json")
 ```
 
 ---
 
-## 📋 API 文档
+## API 文档
 
 ### YOLO11AutoCollector
 
@@ -299,7 +267,7 @@ class DriftReportGenerator:
 
 ---
 
-## 📊 报告结构示例
+## 报告结构示例
 
 ```json
 {
@@ -336,15 +304,17 @@ class DriftReportGenerator:
 
 ---
 
-## 🔬 技术原理
+## 技术原理
 
 ### MMD (Maximum Mean Discrepancy)
 
 MMD 是一种非参数的两样本检验方法，通过比较两个分布在再生核希尔伯特空间 (RKHS) 中的均值嵌入来判断它们是否来自同一分布。
 
-$$MMD^2(P, Q) = \mathbb{E}[k(X, X')] + \mathbb{E}[k(Y, Y')] - 2\mathbb{E}[k(X, Y)]$$
+```
+MMD²(P, Q) = E[k(X, X')] + E[k(Y, Y')] - 2E[k(X, Y)]
+```
 
-其中 $k(\cdot, \cdot)$ 为 RBF 核函数。
+其中 `k(·, ·)` 为 RBF 核函数。
 
 ### 排列检验 (Permutation Test)
 
@@ -361,7 +331,7 @@ $$MMD^2(P, Q) = \mathbb{E}[k(X, X')] + \mathbb{E}[k(Y, Y')] - 2\mathbb{E}[k(X, Y
 
 ---
 
-## 📁 项目结构
+## 项目结构
 
 ```
 DriftKit/
@@ -379,7 +349,6 @@ DriftKit/
 │   ├── train/                    # 训练集
 │   └── val/                      # 验证集
 ├── runs/                         # YOLO 训练输出
-├── ultralytics-main/             # Ultralytics 库
 ├── drift_report.json             # 漂移报告示例
 ├── requirements.txt              # 依赖清单
 └── README.md                     # 项目文档
@@ -387,22 +356,22 @@ DriftKit/
 
 ---
 
-## 🗺️ 路线图
+## 路线图
 
 - [x] 基准特征自动收集
 - [x] MMD 全局漂移检测
 - [x] 排列检验统计显著性
 - [x] 多层级漂移分析（类别/特征/样本）
 - [x] JSON 结构化报告生成
-- [ ] 🔜 PCA 可视化模块
-- [ ] 🔜 在线流式检测支持
-- [ ] 🔜 自动告警与通知集成
-- [ ] 🔜 Web Dashboard
-- [ ] 🔜 支持更多模型架构（RT-DETR、YOLO-World）
+- [ ] PCA 可视化模块
+- [ ] 在线流式检测支持
+- [ ] 自动告警与通知集成
+- [ ] Web Dashboard
+- [ ] 支持更多模型架构（RT-DETR、YOLO-World）
 
 ---
 
-## 🤝 贡献
+## 贡献
 
 欢迎贡献代码、报告问题或提出改进建议！
 
@@ -414,17 +383,6 @@ DriftKit/
 
 ---
 
-## 📄 许可证
+## 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
-
----
-
-<div align="center">
-
-**⭐ 如果这个项目对你有帮助，请给它一个 Star！**
-
-Made with ❤️ for MLOps
-
-</div>
-
+本项目采用 MIT 许可证。
