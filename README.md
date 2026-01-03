@@ -1,4 +1,4 @@
-# DriftKit
+# DriftKit（半成品，没什么用）
 
 **YOLO 感知特征分布漂移检测与解释框架**
 
