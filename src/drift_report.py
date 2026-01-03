@@ -1,89 +1,137 @@
 import os
 import pickle
 import json
+import numpy as np
+import pandas as pd
 from datetime import datetime
+from scipy.stats import ks_2samp
+from sklearn.metrics.pairwise import pairwise_distances
 
+# -----------------------------
+# 工具函数
+# -----------------------------
+def compute_mmd(X, Y, gamma=1.0):
+    XX = pairwise_distances(X, X)
+    YY = pairwise_distances(Y, Y)
+    XY = pairwise_distances(X, Y)
+    K_XX = np.exp(-gamma * XX**2)
+    K_YY = np.exp(-gamma * YY**2)
+    K_XY = np.exp(-gamma * XY**2)
+    m = X.shape[0]; n = Y.shape[0]
+    mmd = K_XX.sum()/(m*m) + K_YY.sum()/(n*n) - 2*K_XY.sum()/(m*n)
+    return float(mmd)
 
+def feature_level_tests(baseline_emb, current_emb, alpha=0.05):
+    changed_dims = []
+    details = []
+    for dim in range(baseline_emb.shape[1]):
+        stat, p = ks_2samp(baseline_emb[:, dim], current_emb[:, dim])
+        mean_diff = baseline_emb[:, dim].mean() - current_emb[:, dim].mean()
+        pooled_std = np.sqrt((baseline_emb[:, dim].var() + current_emb[:, dim].var())/2)
+        d = mean_diff / pooled_std if pooled_std>0 else 0
+        details.append({
+            "feature": f"dim_{dim}",
+            "pval": float(p),
+            "cohen_d": float(d)
+        })
+        if p < alpha and abs(d) > 0.3:
+            changed_dims.append(f"dim_{dim}")
+    return changed_dims, details
+
+def nearest_neighbor_anomaly(baseline_emb, current_emb, current_names, top_k=50):
+    dists = pairwise_distances(current_emb, baseline_emb)
+    nn_dist = dists.min(axis=1)
+    top_idx = np.argsort(nn_dist)[-top_k:][::-1]
+    top_samples = [{"img_name": str(current_names[i]), "nn_dist": float(nn_dist[i])} for i in top_idx]
+    return top_samples
+
+# -----------------------------
+# DriftReportGenerator
+# -----------------------------
 class DriftReportGenerator:
-    def __init__(self, result_path="drift_result.pkl"):
-        if not os.path.exists(result_path):
-            raise FileNotFoundError(
-                f"未找到漂移检测结果文件: {result_path}"
-            )
+    def __init__(self, baseline_pkl, test_pkl):
+        if not os.path.exists(baseline_pkl):
+            raise FileNotFoundError(f"未找到基准数据: {baseline_pkl}")
+        if not os.path.exists(test_pkl):
+            raise FileNotFoundError(f"未找到测试数据: {test_pkl}")
 
-        with open(result_path, "rb") as f:
-            self.result = pickle.load(f)
+        self.baseline_df = pd.read_pickle(baseline_pkl)
+        self.test_df = pd.read_pickle(test_pkl)
+        self.baseline_emb = np.stack(self.baseline_df["embedding_pca"].values)
+        self.test_emb = np.stack(self.test_df["embedding_pca"].values)
+        self.test_names = self.test_df["img_name"].values
 
-        print("✅ 已加载漂移检测结果")
+    def generate_report(self, output_path="../drift_report.json", alpha=0.05):
+        # 全局 MMD 漂移
+        mmd_score = compute_mmd(self.baseline_emb, self.test_emb)
+        is_drift_global = bool(mmd_score > 0.01)
+        status_global = "DRIFT DETECTED" if is_drift_global else "DATA STABLE"
 
-    def generate(self, output_path="drift_report.json"):
-        """
-        生成结构化、可读的漂移报告
-        """
+        # 按类漂移
+        per_class = {}
+        classes = self.baseline_df["label"].unique()
+        for cls in classes:
+            base_cls_emb = np.stack(self.baseline_df[self.baseline_df["label"]==cls]["embedding_pca"].values)
+            test_cls_emb = np.stack(self.test_df[self.test_df["label"]==cls]["embedding_pca"].values)
+            mmd_cls = compute_mmd(base_cls_emb, test_cls_emb)
+            per_class[int(cls)] = {
+                "baseline_size": int(len(base_cls_emb)),
+                "test_size": int(len(test_cls_emb)),
+                "mmd": float(mmd_cls),
+                "is_drift": bool(mmd_cls > 0.01)
+            }
+
+        # 特征维度漂移
+        changed_dims, feature_details = feature_level_tests(self.baseline_emb, self.test_emb, alpha=alpha)
+
+        # 样本级漂移
+        top_samples = nearest_neighbor_anomaly(self.baseline_emb, self.test_emb, self.test_names, top_k=50)
+
+        # 生成报告
         report = {
-            "meta": self._build_meta(),
-            "data_info": self._build_data_info(),
-            "statistics": self._build_statistics(),
-            "decision": self._build_decision(),
-            "interpretation": self._build_interpretation(),
+            "meta": {
+                "generated_at": datetime.now().isoformat(),
+                "report_type": "YOLO Feature Drift Report",
+                "version": "v1.0"
+            },
+            "data_info": {
+                "baseline_source": str("unknown"),
+                "test_source": str("unknown"),
+                "baseline_size": int(len(self.baseline_emb)),
+                "test_size": int(len(self.test_emb))
+            },
+            "statistics": {
+                "mmd_score": float(mmd_score),
+                "alpha": float(alpha)
+            },
+            "decision": {
+                "is_drift": is_drift_global,
+                "status": status_global
+            },
+            "interpretation": (
+                "检测到漂移" if is_drift_global else
+                "当前数据分布与训练阶段保持一致，未发现显著特征漂移，模型运行状态稳定。"
+            ),
+            "per_class_drift": per_class,
+            "feature_level_drift": {
+                "changed_dims": changed_dims,
+                "details": feature_details
+            },
+            "sample_level_drift": top_samples
         }
 
+        # 保存 JSON
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
 
         print(f"📄 漂移报告已生成: {output_path}")
         return report
 
-    # -----------------------------
-    # 报告各组成部分
-    # -----------------------------
-    def _build_meta(self):
-        return {
-            "generated_at": datetime.now().isoformat(),
-            "report_type": "YOLO Feature Drift Report",
-            "version": "v1.0",
-        }
-
-    def _build_data_info(self):
-        return {
-            "baseline_source": self.result.get("baseline_source"),
-            "test_source": self.result.get("test_source"),
-            "baseline_size": self.result.get("baseline_size"),
-            "test_size": self.result.get("test_size"),
-            "window_size": self.result.get("window_size"),
-        }
-
-    def _build_statistics(self):
-        return {
-            "mmd_score": round(self.result["mmd_score"], 5),
-            "p_value": round(self.result["p_value"], 5),
-            "alpha": self.result["alpha"],
-            "visualization": self.result.get("visualization"),
-        }
-
-    def _build_decision(self):
-        return {
-            "is_drift": self.result["is_drift"],
-            "status": self.result["status"],
-        }
-
-    def _build_interpretation(self):
-        """
-        给“非算法人员”看的解释
-        """
-        if self.result["is_drift"]:
-            return (
-                "检测到当前数据分布与训练阶段存在显著差异。"
-                "建议进一步定位漂移来源（类别、场景或特征维度），"
-                "并评估是否需要重新训练或自适应调整模型。"
-            )
-        else:
-            return (
-                "当前数据分布与训练阶段保持一致，"
-                "未发现显著特征漂移，模型运行状态稳定。"
-            )
-
-
+# -----------------------------
+# CLI
+# -----------------------------
 if __name__ == "__main__":
-    generator = DriftReportGenerator("../drift_result.pkl")
-    generator.generate("drift_report.json")
+    baseline_path = "../baseline_assets/baseline_db.pkl"
+    test_path = "../baseline_assets/val_test_data.pkl"
+    generator = DriftReportGenerator(baseline_path, test_path)
+    generator.generate_report()
