@@ -4,8 +4,8 @@ import pandas as pd
 import pickle
 import gc
 from ultralytics import YOLO
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA  # pyright: ignore[reportMissingImports]
+from sklearn.preprocessing import StandardScaler  # pyright: ignore[reportMissingImports]
 from pathlib import Path
 
 
