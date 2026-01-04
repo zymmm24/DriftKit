@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist
-from sklearn.metrics.pairwise import rbf_kernel, pairwise_distances
+from sklearn.metrics.pairwise import rbf_kernel, pairwise_distances  # pyright: ignore[reportMissingImports]
 from scipy.stats import ks_2samp
 from datetime import datetime
 
@@ -45,7 +45,7 @@ def nearest_neighbor_anomaly(baseline_emb, current_emb, top_k=50):
 # 核心检测器
 # -----------------------------
 class DriftDetector:
-    def __init__(self, baseline_path="../baseline_assets/baseline_db.pkl"):
+    def __init__(self, baseline_path="baseline_assets/baseline_db.pkl"):
         self.baseline_df = pd.read_pickle(baseline_path)
         self.baseline_X = np.stack(self.baseline_df["embedding_pca"].values).astype(np.float32)
         self.baseline_labels = self.baseline_df['label'].values
@@ -78,7 +78,7 @@ class DriftDetector:
         return observed_mmd, p_value
 
     # -------- 主检测流程 --------
-    def detect(self, test_pkl_path, window_size=100, alpha=0.05, save_path="../baseline_assets/drift_result.pkl"):
+    def detect(self, test_pkl_path, window_size=100, alpha=0.05, save_path="baseline_assets/drift_result.pkl"):
         test_df = pd.read_pickle(test_pkl_path)
         test_X = np.stack(test_df['embedding_pca'].values).astype(np.float32)
         test_labels = test_df['label'].values
@@ -141,7 +141,13 @@ class DriftDetector:
 # CLI
 # -----------------------------
 if __name__ == "__main__":
-    detector = DriftDetector()
-    detector.detect("baseline_assets/val_test_data.pkl")
+    try:
+        detector = DriftDetector()
+        detector.detect("baseline_assets/val_test_data.pkl")
+        print("✅ 脚本执行成功完成！")
+    except Exception as e:
+        print(f"❌ 脚本执行失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 
