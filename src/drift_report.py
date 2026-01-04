@@ -131,7 +131,7 @@ class DriftReportGenerator:
 # CLI
 # -----------------------------
 if __name__ == "__main__":
-    baseline_path = "../baseline_assets/baseline_db.pkl"
-    test_path = "../baseline_assets/val_test_data.pkl"
+    baseline_path = "baseline_assets/baseline_db.pkl"
+    test_path = "baseline_assets/val_test_data.pkl"
     generator = DriftReportGenerator(baseline_path, test_path)
     generator.generate_report()

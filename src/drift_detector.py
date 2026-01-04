@@ -142,4 +142,6 @@ class DriftDetector:
 # -----------------------------
 if __name__ == "__main__":
     detector = DriftDetector()
-    detector.detect("../baseline_assets/val_test_data.pkl")
+    detector.detect("baseline_assets/val_test_data.pkl")
+
+

@@ -120,10 +120,10 @@ class YOLO11AutoCollector:
 
 
 if __name__ == "__main__":
-    MODEL_P = "../runs/classify/train2/weights/best.pt"
-    TRAIN_D = "../dataset/train"
-    VAL_D = "../dataset/val"
-    ASSET_DIR = "../baseline_assets"
+    MODEL_P = "runs/classify/train2/weights/best.pt"
+    TRAIN_D = "dataset/train"
+    VAL_D = "dataset/val"
+    ASSET_DIR = "baseline_assets"
 
     # ---------- Step 1: 训练集 ----------
     print("\n[STEP 1] 生成训练集基准")
